@@ -8,6 +8,9 @@ import (
 	"time"
 
 	gqlgen "github.com/99designs/gqlgen/graphql"
+	"github.com/99designs/gqlgen/graphql/handler/transport"
+	"github.com/99designs/gqlgen/graphql/playground"
+	"github.com/kyma-incubator/compass/components/director/pkg/sanitizer"
 	"github.com/kyma-incubator/compass/components/operations-controller/client"
 	cr "sigs.k8s.io/controller-runtime"
 
@@ -82,7 +85,7 @@ import (
 	"github.com/kyma-incubator/compass/components/director/pkg/signal"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/99designs/gqlgen/handler"
+	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/gorilla/mux"
 	"github.com/kyma-incubator/compass/components/director/pkg/graphql"
 	"github.com/pkg/errors"
@@ -133,6 +136,37 @@ type config struct {
 
 	DisableAsyncMode bool `envconfig:"default=false"`
 }
+//
+//func main() {
+//	tmp := getNil([]*graphql.Webhook{})
+//	_, ok := tmp.([]*graphql.Webhook)
+//	fmt.Printf("slice: %t\n", ok)
+//
+//	o := graphql.Webhook{
+//		ID: "1234",
+//	}
+//	tmp = getNil(o)
+//	_, ok = tmp.(graphql.Webhook)
+//	fmt.Printf("object: %t\n", ok)
+//
+//	p := &graphql.Webhook{
+//		ID: "1234",
+//	}
+//	tmp = getNil(p)
+//	_, ok = tmp.(*graphql.Webhook)
+//	fmt.Printf("pointer: %t %T\n", ok, tmp)
+//
+//}
+//
+//func getNil(obj interface{}) interface{} {
+//	t := reflect.TypeOf(obj)
+//	if t.Kind() == reflect.Slice {
+//		return reflect.MakeSlice(t, 0, 0).Interface()
+//	}
+//
+//	newT := reflect.New(t)
+//	return newT.Elem().Interface()
+//}
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -195,6 +229,7 @@ func main() {
 			Async:       getAsyncDirective(ctx, cfg, transact, appRepo),
 			HasScenario: scenario.NewDirective(transact, label.NewRepository(label.NewConverter()), bundleRepo(), bundleInstanceAuthRepo()).HasScenario,
 			HasScopes:   scope.NewDirective(cfgProvider).VerifyScopes,
+			Sanitize:    sanitizer.NewDirective(cfgProvider).Sanitize,
 			Validate:    inputvalidation.NewDirective().Validate,
 		},
 	}
@@ -220,7 +255,7 @@ func main() {
 	statusMiddleware := statusupdate.New(transact, statusupdate.NewRepository())
 
 	mainRouter := mux.NewRouter()
-	mainRouter.HandleFunc("/", handler.Playground("Dataloader", cfg.PlaygroundAPIEndpoint))
+	mainRouter.HandleFunc("/", playground.Handler("Dataloader", cfg.PlaygroundAPIEndpoint))
 
 	mainRouter.Use(correlation.AttachCorrelationIDToContext(), log.RequestLogger(), header.AttachHeadersToContext())
 	presenter := error_presenter.NewPresenter(uid.NewService())
@@ -231,10 +266,22 @@ func main() {
 	gqlAPIRouter.Use(authMiddleware.Handler())
 	gqlAPIRouter.Use(packageToBundlesMiddleware.Handler())
 	gqlAPIRouter.Use(statusMiddleware.Handler())
-	gqlAPIRouter.HandleFunc("", metricsCollector.GraphQLHandlerWithInstrumentation(handler.GraphQL(executableSchema,
-		handler.RequestMiddleware(operationMiddleware.ExtensionHandler),
-		handler.ErrorPresenter(presenter.Do),
-		handler.RecoverFunc(panic_handler.RecoverFn))))
+
+	gqlServ := handler.New(executableSchema)
+
+	gqlServ.AddTransport(transport.Options{})
+	gqlServ.AddTransport(transport.GET{})
+	gqlServ.AddTransport(transport.POST{})
+
+	gqlServ.AroundOperations(operationMiddleware.AddOperationsToCtx)
+	gqlServ.AroundResponses(operationMiddleware.AddLocationsToResponse)
+	gqlServ.SetErrorPresenter(presenter.Do)
+	gqlServ.SetRecoverFunc(panic_handler.RecoverFn)
+	//handler.GraphQL(executableSchema,
+	//	handler.RequestMiddleware(operationMiddleware.ExtensionHandler),
+	//	handler.ErrorPresenter(presenter.Do),
+	//	handler.RecoverFunc(panic_handler.RecoverFn)))
+	gqlAPIRouter.HandleFunc("", metricsCollector.GraphQLHandlerWithInstrumentation(gqlServ))
 
 	logger.Infof("Registering Tenant Mapping endpoint on %s...", cfg.TenantMappingEndpoint)
 	tenantMappingHandlerFunc, err := getTenantMappingHandlerFunc(transact, authenticators, cfg.StaticUsersSrc, cfg.StaticGroupsSrc, cfgProvider)

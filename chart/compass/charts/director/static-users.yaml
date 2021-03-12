@@ -6,6 +6,7 @@
   scopes:
   - "application:read"
   - "application:write"
+  - "application_auth:read"
   - "application_template:read"
   - "application_template:write"
   - "integration_system:read"

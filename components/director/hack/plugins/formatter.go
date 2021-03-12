@@ -30,11 +30,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/vektah/gqlparser/ast"
+	"github.com/vektah/gqlparser/v2/ast"
 )
 
 type Formatter interface {
 	FormatSchema(schema *ast.Schema)
+	FormatSchemaDocument(doc *ast.SchemaDocument)
+	FormatQueryDocument(doc *ast.QueryDocument)
 }
 
 func NewFormatter(w io.Writer) Formatter {
@@ -52,10 +54,7 @@ type formatter struct {
 }
 
 func (f *formatter) writeString(s string) {
-	_, err := f.writer.Write([]byte(s))
-	if err != nil {
-		panic(err)
-	}
+	_, _ = f.writer.Write([]byte(s))
 }
 
 func (f *formatter) writeIndent() *formatter {
@@ -182,16 +181,80 @@ func (f *formatter) FormatSchema(schema *ast.Schema) {
 		f.FormatDirectiveDefinition(schema.Directives[name])
 	}
 
-	var dl OrderedDefinitionList
-	for _, v := range schema.Types {
-		dl = append(dl, *v)
+	typeNames := make([]string, 0, len(schema.Types))
+	for name := range schema.Types {
+		typeNames = append(typeNames, name)
+	}
+	sort.Strings(typeNames)
+	for _, name := range typeNames {
+		f.FormatDefinition(schema.Types[name], false)
+	}
+}
+
+func (f *formatter) FormatSchemaDocument(doc *ast.SchemaDocument) {
+	// TODO emit by position based order
+
+	if doc == nil {
+		return
 	}
 
-	sort.Sort(dl)
+	f.FormatSchemaDefinitionList(doc.Schema, false)
+	f.FormatSchemaDefinitionList(doc.SchemaExtension, true)
 
-	for _, t := range dl {
-		f.FormatDefinition(&t, false)
+	f.FormatDirectiveDefinitionList(doc.Directives)
+
+	f.FormatDefinitionList(doc.Definitions, false)
+	f.FormatDefinitionList(doc.Extensions, true)
+}
+
+func (f *formatter) FormatQueryDocument(doc *ast.QueryDocument) {
+	// TODO emit by position based order
+
+	if doc == nil {
+		return
 	}
+
+	f.FormatOperationList(doc.Operations)
+	f.FormatFragmentDefinitionList(doc.Fragments)
+}
+
+func (f *formatter) FormatSchemaDefinitionList(lists ast.SchemaDefinitionList, extension bool) {
+	if len(lists) == 0 {
+		return
+	}
+
+	if extension {
+		f.WriteWord("extend")
+	}
+	f.WriteWord("schema").WriteString("{").WriteNewline()
+	f.IncrementIndent()
+
+	for _, def := range lists {
+		f.FormatSchemaDefinition(def)
+	}
+
+	f.DecrementIndent()
+	f.WriteString("}").WriteNewline()
+}
+
+func (f *formatter) FormatSchemaDefinition(def *ast.SchemaDefinition) {
+	f.WriteDescription(def.Description)
+
+	f.FormatDirectiveList(def.Directives)
+
+	f.FormatOperationTypeDefinitionList(def.OperationTypes)
+}
+
+func (f *formatter) FormatOperationTypeDefinitionList(lists ast.OperationTypeDefinitionList) {
+	for _, def := range lists {
+		f.FormatOperationTypeDefinition(def)
+	}
+}
+
+func (f *formatter) FormatOperationTypeDefinition(def *ast.OperationTypeDefinition) {
+	f.WriteWord(string(def.Operation)).NoPadding().WriteString(":").NeedPadding()
+	f.WriteWord(def.Type)
+	f.WriteNewline()
 }
 
 func (f *formatter) FormatFieldList(fieldList ast.FieldList) {
@@ -249,7 +312,10 @@ func (f *formatter) FormatArgumentDefinitionList(lists ast.ArgumentDefinitionLis
 }
 
 func (f *formatter) FormatArgumentDefinition(def *ast.ArgumentDefinition) {
-	f.WriteDescription(def.Description)
+	if def.Description != "" {
+		f.WriteNewline().IncrementIndent()
+		f.WriteDescription(def.Description)
+	}
 
 	f.WriteWord(def.Name).NoPadding().WriteString(":").NeedPadding()
 	f.FormatType(def.Type)
@@ -259,7 +325,10 @@ func (f *formatter) FormatArgumentDefinition(def *ast.ArgumentDefinition) {
 		f.FormatValue(def.DefaultValue)
 	}
 
-	f.FormatDirectiveList(def.Directives)
+	if def.Description != "" {
+		f.DecrementIndent()
+		f.WriteNewline()
+	}
 }
 
 func (f *formatter) FormatDirectiveLocation(location ast.DirectiveLocation) {
@@ -306,6 +375,16 @@ func (f *formatter) FormatDirectiveDefinition(def *ast.DirectiveDefinition) {
 	f.WriteNewline()
 }
 
+func (f *formatter) FormatDefinitionList(lists ast.DefinitionList, extend bool) {
+	if len(lists) == 0 {
+		return
+	}
+
+	for _, dec := range lists {
+		f.FormatDefinition(dec, extend)
+	}
+}
+
 func (f *formatter) FormatDefinition(def *ast.Definition, extend bool) {
 	if !f.emitBuiltin && def.BuiltIn {
 		return
@@ -337,21 +416,20 @@ func (f *formatter) FormatDefinition(def *ast.Definition, extend bool) {
 		f.WriteWord("input").WriteWord(def.Name)
 	}
 
+	if len(def.Interfaces) != 0 {
+		f.WriteWord("implements").WriteWord(strings.Join(def.Interfaces, " & "))
+	}
+
 	f.FormatDirectiveList(def.Directives)
 
 	if len(def.Types) != 0 {
 		f.WriteWord("=").WriteWord(strings.Join(def.Types, " | "))
 	}
 
-	if len(def.Interfaces) != 0 {
-		f.WriteWord("implements").WriteWord(strings.Join(def.Interfaces, ", "))
-	}
-
 	f.FormatFieldList(def.Fields)
 
 	f.FormatEnumValueList(def.EnumValues)
 
-	f.WriteNewline()
 	f.WriteNewline()
 }
 
@@ -378,6 +456,26 @@ func (f *formatter) FormatEnumValueDefinition(def *ast.EnumValueDefinition) {
 	f.FormatDirectiveList(def.Directives)
 
 	f.WriteNewline()
+}
+
+func (f *formatter) FormatOperationList(lists ast.OperationList) {
+	for _, def := range lists {
+		f.FormatOperationDefinition(def)
+	}
+}
+
+func (f *formatter) FormatOperationDefinition(def *ast.OperationDefinition) {
+	f.WriteWord(string(def.Operation))
+	if def.Name != "" {
+		f.WriteWord(def.Name)
+	}
+	f.FormatVariableDefinitionList(def.VariableDefinitions)
+	f.FormatDirectiveList(def.Directives)
+
+	if len(def.SelectionSet) != 0 {
+		f.FormatSelectionSet(def.SelectionSet)
+		f.WriteNewline()
+	}
 }
 
 func (f *formatter) FormatDirectiveList(lists ast.DirectiveList) {
@@ -413,6 +511,53 @@ func (f *formatter) FormatArgumentList(lists ast.ArgumentList) {
 func (f *formatter) FormatArgument(arg *ast.Argument) {
 	f.WriteWord(arg.Name).NoPadding().WriteString(":").NeedPadding()
 	f.WriteString(arg.Value.String())
+}
+
+func (f *formatter) FormatFragmentDefinitionList(lists ast.FragmentDefinitionList) {
+	for _, def := range lists {
+		f.FormatFragmentDefinition(def)
+	}
+}
+
+func (f *formatter) FormatFragmentDefinition(def *ast.FragmentDefinition) {
+	f.WriteWord("fragment").WriteWord(def.Name)
+	f.FormatVariableDefinitionList(def.VariableDefinition)
+	f.WriteWord("on").WriteWord(def.TypeCondition)
+	f.FormatDirectiveList(def.Directives)
+
+	if len(def.SelectionSet) != 0 {
+		f.FormatSelectionSet(def.SelectionSet)
+		f.WriteNewline()
+	}
+}
+
+func (f *formatter) FormatVariableDefinitionList(lists ast.VariableDefinitionList) {
+	if len(lists) == 0 {
+		return
+	}
+
+	f.WriteString("(")
+	for idx, def := range lists {
+		f.FormatVariableDefinition(def)
+
+		if idx != len(lists)-1 {
+			f.NoPadding().WriteWord(",")
+		}
+	}
+	f.NoPadding().WriteString(")").NeedPadding()
+}
+
+func (f *formatter) FormatVariableDefinition(def *ast.VariableDefinition) {
+	f.WriteString("$").WriteWord(def.Variable).NoPadding().WriteString(":").NeedPadding()
+	f.FormatType(def.Type)
+
+	if def.DefaultValue != nil {
+		f.WriteWord("=")
+		f.FormatValue(def.DefaultValue)
+	}
+
+	// TODO https://github.com/vektah/gqlparser/v2/issues/102
+	//   VariableDefinition : Variable : Type DefaultValue? Directives[Const]?
 }
 
 func (f *formatter) FormatSelectionSet(sets ast.SelectionSet) {

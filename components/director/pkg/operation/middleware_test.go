@@ -26,7 +26,7 @@ import (
 	"github.com/kyma-incubator/compass/components/director/pkg/operation"
 	"github.com/kyma-incubator/compass/components/director/pkg/resource"
 	"github.com/stretchr/testify/require"
-	"github.com/vektah/gqlparser/ast"
+	"github.com/vektah/gqlparser/v2/ast"
 )
 
 const (
@@ -48,9 +48,9 @@ func TestExtensionHandlerOperation(t *testing.T) {
 		}
 
 		middleware := operation.NewMiddleware(directorURL)
-		resp := middleware.ExtensionHandler(context.Background(), dummyResolver.SuccessResolve)
+		resp := middleware.AddLocationsToResponse(context.Background(), dummyResolver.SuccessResolve)
 
-		require.Equal(t, gqlResultResponse(gqlResults[0].resultName), resp)
+		require.Equal(t, gqlResultResponse(gqlResults[0].resultName), resp.Data)
 	})
 
 	t.Run("when an async operation is found in the context, location extension would be attached and data would be dropped", func(t *testing.T) {
@@ -167,13 +167,9 @@ func TestExtensionHandlerOperation(t *testing.T) {
 	})
 
 	t.Run("when RegisterExtension fails, should return error message", func(t *testing.T) {
-		reqCtx := &gqlgen.RequestContext{
-			Extensions: map[string]interface{}{
-				operation.LocationsParam: []string{"http://test-url/"},
-			},
-		}
-
-		ctx := gqlgen.WithRequestContext(context.Background(), reqCtx)
+		gqlgen.WithOperationContext(context.Background())
+		gqlgen.RegisterExtension(, operation.LocationsParam, []string{"http://test-url/"})
+		gqlgen.GetOperationContext()
 		operations := &[]*operation.Operation{
 			{
 				OperationType:     operation.OperationTypeCreate,
@@ -188,7 +184,7 @@ func TestExtensionHandlerOperation(t *testing.T) {
 		}
 
 		middleware := operation.NewMiddleware(directorURL)
-		resp := middleware.ExtensionHandler(ctx, dummyResolver.SuccessResolve)
+		resp := middleware.AddLocationsToResponse(gqlgen., dummyResolver.SuccessResolve)
 
 		require.Equal(t, `{"error": "unable to finalize operation location"}`, string(resp))
 	})
@@ -200,7 +196,7 @@ type dummyMiddlewareResolver struct {
 	gqlResults        []gqlResult
 }
 
-func (d *dummyMiddlewareResolver) SuccessResolve(ctx context.Context) []byte {
+func (d *dummyMiddlewareResolver) SuccessResolve(ctx context.Context) *gqlgen.Response {
 	if d.operationToAttach != nil {
 		operation.SaveToContext(ctx, d.operationToAttach)
 	}
@@ -214,7 +210,9 @@ func (d *dummyMiddlewareResolver) SuccessResolve(ctx context.Context) []byte {
 		}
 	}
 
-	return []byte(fmt.Sprintf("{%s}", body))
+	return &gqlgen.Response{
+		Data: []byte(fmt.Sprintf("{%s}", body)),
+	}
 }
 
 func operationURL(op *operation.Operation, directorURL string) string {

@@ -375,7 +375,7 @@ func (r *Resolver) DeleteRuntimeLabel(ctx context.Context, runtimeID string, key
 	}, nil
 }
 
-func (r *Resolver) Labels(ctx context.Context, obj *graphql.Runtime, key *string) (*graphql.Labels, error) {
+func (r *Resolver) Labels(ctx context.Context, obj *graphql.Runtime, key *string) (graphql.Labels, error) {
 	if obj == nil {
 		return nil, apperrors.NewInternalError("Runtime cannot be empty")
 	}
@@ -407,8 +407,7 @@ func (r *Resolver) Labels(ctx context.Context, obj *graphql.Runtime, key *string
 		resultLabels[label.Key] = label.Value
 	}
 
-	var gqlLabels graphql.Labels = resultLabels
-	return &gqlLabels, nil
+	return resultLabels, nil
 }
 
 func (r *Resolver) Auths(ctx context.Context, obj *graphql.Runtime) ([]*graphql.SystemAuth, error) {

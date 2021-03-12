@@ -3,7 +3,7 @@ module github.com/kyma-incubator/compass/components/director
 go 1.15
 
 require (
-	github.com/99designs/gqlgen v0.9.3
+	github.com/99designs/gqlgen v0.11.0
 	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/Masterminds/goutils v1.1.0 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
@@ -46,6 +46,7 @@ require (
 	github.com/tidwall/gjson v1.6.8
 	github.com/tidwall/sjson v1.1.4
 	github.com/vektah/gqlparser v1.3.1
+	github.com/vektah/gqlparser/v2 v2.1.0
 	github.com/vrischmann/envconfig v1.3.0
 	github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb // indirect
 	github.com/xeipuuv/gojsonschema v1.2.0

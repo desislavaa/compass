@@ -42,7 +42,7 @@ import (
 	"github.com/kyma-incubator/compass/components/director/pkg/persistence/txtest"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/vektah/gqlparser/ast"
+	"github.com/vektah/gqlparser/v2/ast"
 )
 
 const (
