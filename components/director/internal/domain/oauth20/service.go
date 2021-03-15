@@ -72,6 +72,22 @@ func (s *service) CreateClientCredentials(ctx context.Context, objectType model.
 	return credentialData, nil
 }
 
+func (s *service) UpdateClientCredentials(ctx context.Context, clientID string, objectType model.SystemAuthReferenceObjectType) error {
+	scopes, err := s.getClientCredentialScopes(objectType)
+	if err != nil {
+		if !model.IsIntegrationSystemNoTenantFlow(err, objectType) {
+			return err
+		}
+	}
+	log.C(ctx).Debugf("Fetched client credential scopes: %s for %s", scopes, objectType)
+
+	if err := s.updateClient(ctx, clientID, scopes); err != nil {
+		return errors.Wrapf(err, "while updating client with ID %s in Hydra", clientID)
+	}
+
+	return nil
+}
+
 func (s *service) DeleteClientCredentials(ctx context.Context, clientID string) error {
 	return s.unregisterClient(ctx, clientID)
 }
@@ -120,8 +136,7 @@ func (s *service) registerClient(ctx context.Context, clientID string, scopes []
 	}
 
 	buffer := &bytes.Buffer{}
-	err := json.NewEncoder(buffer).Encode(&reqBody)
-	if err != nil {
+	if err := json.NewEncoder(buffer).Encode(&reqBody); err != nil {
 		return "", errors.Wrap(err, "while encoding body")
 	}
 
@@ -136,13 +151,37 @@ func (s *service) registerClient(ctx context.Context, clientID string, scopes []
 	}
 
 	var registrationResp clientCredentialsRegistrationResponse
-	err = json.NewDecoder(resp.Body).Decode(&registrationResp)
-	if err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&registrationResp); err != nil {
 		return "", errors.Wrap(err, "while decoding response body")
 	}
 
 	log.C(ctx).Debugf("client_id %s and client_secret successfully registered in Hydra", clientID)
 	return registrationResp.ClientSecret, nil
+}
+
+func (s *service) updateClient(ctx context.Context, clientID string, scopes []string) error {
+	log.C(ctx).Debugf("Updating client_id %s and client_secret in Hydra with scopes: %s", clientID, scopes)
+	reqBody := &clientCredentialsRegistrationBody{
+		Scope: strings.Join(scopes, " "),
+	}
+
+	buffer := &bytes.Buffer{}
+	if err := json.NewEncoder(buffer).Encode(&reqBody); err != nil {
+		return errors.Wrap(err, "while encoding body")
+	}
+
+	resp, closeBody, err := s.doRequest(ctx, http.MethodPut, fmt.Sprintf("%s/%s", s.clientEndpoint, clientID), buffer)
+	if err != nil {
+		return err
+	}
+	defer closeBody(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("invalid HTTP status code: received: %d, expected %d", resp.StatusCode, http.StatusOK)
+	}
+
+	log.C(ctx).Debugf("client_id %s and client_secret successfully registered in Hydra", clientID)
+	return nil
 }
 
 func (s *service) unregisterClient(ctx context.Context, clientID string) error {

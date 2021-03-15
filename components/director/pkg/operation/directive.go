@@ -65,7 +65,7 @@ func NewDirective(transact persistence.Transactioner, webhookFetcherFunc Webhook
 
 // HandleOperation enriches the request with an Operation information when the requesting mutation is annotated with the Async directive
 func (d *directive) HandleOperation(ctx context.Context, _ interface{}, next gqlgen.Resolver, operationType graphql.OperationType, webhookType *graphql.WebhookType, idField *string) (res interface{}, err error) {
-	resCtx := gqlgen.GetResolverContext(ctx)
+	resCtx := gqlgen.GetFieldContext(ctx)
 	mode, err := getOperationMode(resCtx)
 	if err != nil {
 		return nil, err
